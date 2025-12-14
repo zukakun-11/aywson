@@ -63,6 +63,46 @@ describe("modify", () => {
 }`);
   });
 
+  it("should preserve top-level comments", () => {
+    const json = `// top level comment
+{
+  "a": 123,
+  "b": 456
+}`;
+    const result = modify(json, { a: 999 });
+    expect(result).toBe(`// top level comment
+{
+  "a": 999
+}`);
+  });
+
+  it("should preserve top-level block comments", () => {
+    const json = `/* top level block comment */
+{
+  "a": 123
+}`;
+    const result = modify(json, { a: 999 });
+    expect(result).toBe(`/* top level block comment */
+{
+  "a": 999
+}`);
+  });
+
+  it("should preserve multiple top-level comments", () => {
+    const json = `// comment 1
+// comment 2
+{
+  "a": 123,
+  "b": 456
+}`;
+    const result = modify(json, { b: 456 });
+    expect(result).toBe(`// comment 1
+// comment 2
+{
+  "b": 456
+}`);
+  });
+
   it("should handle nested objects by updating individual values", () => {
     const json = '{ "nested": { "a": 1 } }';
     const result = modify(json, { nested: { a: 2, b: 3 } });

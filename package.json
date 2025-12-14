@@ -2,8 +2,20 @@
   "name": "aywson",
   "version": "0.0.1",
   "description": "Modify JSONC while preserving comments and formatting.",
+  "author": "Sunil Pai <threepointone@gmail.com>",
+  "license": "MIT",
+  "type": "module",
   "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/threepointone/aywson.git"
+  },
+  "homepage": "https://github.com/threepointone/aywson",
+  "bugs": {
+    "url": "https://github.com/threepointone/aywson/issues"
+  },
   "exports": {
     ".": {
       "types": {
@@ -30,9 +42,6 @@
     "formatting",
     "modify"
   ],
-  "author": "Sunil Pai <threepointone@gmail.com>",
-  "license": "MIT",
-  "type": "module",
   "devDependencies": {
     "@biomejs/biome": "^2.3.8",
     "@changesets/changelog-github": "^0.5.2",

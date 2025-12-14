@@ -14,7 +14,7 @@ import {
   setComment
 } from "./index";
 
-describe("modify (legacy API)", () => {
+describe("modify", () => {
   it("should modify a value while preserving comments", () => {
     const json = '{/* comment */ "foo": "bar" }';
     const result = modify(json, { foo: "baz" });

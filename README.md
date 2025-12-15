@@ -280,6 +280,124 @@ remove(
 // → '{ // ** this comment will be preserved }' — comment kept
 ```
 
+## Object Iteration & Transformation
+
+Even though aywson works on strings, you can still do full object manipulation:
+
+```ts
+import { parse, set, remove, merge } from "aywson";
+
+let json = `{
+  // Database settings
+  "database": {
+    "host": "localhost",
+    "port": 5432
+  },
+  // Feature flags
+  "features": {
+    "darkMode": false,
+    "beta": true
+  }
+}`;
+
+// Parse to iterate/transform
+const config = parse<Record<string, unknown>>(json);
+
+// Example: Update all feature flags to false
+for (const [key, value] of Object.entries(config.features as object)) {
+  if (typeof value === "boolean") {
+    json = set(json, ["features", key], false);
+  }
+}
+
+// Example: Remove fields based on condition
+for (const key of Object.keys(config)) {
+  if (key.startsWith("_")) {
+    json = remove(json, [key]);
+  }
+}
+
+// Example: Bulk update from transformed object
+const updates = Object.fromEntries(
+  Object.entries(config.database as object).map(([k, v]) => [
+    k,
+    typeof v === "string" ? v.toUpperCase() : v
+  ])
+);
+json = merge(json, { database: updates });
+```
+
+The key insight: use `parse()` to read and decide _what_ to change, then use `set()`/`remove()`/`merge()` to apply changes while preserving formatting and comments.
+
+## Building JSONC from Scratch
+
+You can build a JSONC file from scratch using `set()` with comments:
+
+```ts
+import { set } from "aywson";
+
+let json = "{}";
+
+// Build up the structure with comments
+json = set(json, ["database"], {}, "Database configuration");
+json = set(json, ["database", "host"], "localhost", "Primary database host");
+json = set(json, ["database", "port"], 5432);
+json = set(json, ["database", "ssl"], true, "Enable SSL in production");
+
+json = set(json, ["features"], {}, "Feature flags");
+json = set(json, ["features", "darkMode"], false);
+json = set(
+  json,
+  ["features", "beta"],
+  true,
+  "Beta features - use with caution"
+);
+
+console.log(json);
+```
+
+Output:
+
+```jsonc
+{
+  // Database configuration
+  "database": {
+    // Primary database host
+    "host": "localhost",
+    "port": 5432,
+    // Enable SSL in production
+    "ssl": true
+  },
+  // Feature flags
+  "features": {
+    "darkMode": false,
+    // Beta features - use with caution
+    "beta": true
+  }
+}
+```
+
+For more complex construction, you can also use `merge()`:
+
+```ts
+import { merge, setComment } from "aywson";
+
+let json = "{}";
+
+// Add multiple fields at once
+json = merge(json, {
+  name: "my-app",
+  version: "1.0.0",
+  scripts: {
+    build: "tsc",
+    test: "vitest"
+  }
+});
+
+// Add comments where needed
+json = setComment(json, ["scripts"], "Available npm scripts");
+```
+
 ## CLI
 
 ```bash

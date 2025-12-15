@@ -30,7 +30,8 @@ import {
   getTrailingComment, // read trailing comment
   setTrailingComment, // add trailing comment
   removeTrailingComment, // remove trailing comment
-  sort // sort object keys
+  sort, // sort object keys
+  format // format/prettify JSONC
 } from "aywson";
 ```
 
@@ -223,6 +224,47 @@ sort(json, [], { deep: false });
 
 // Sort only a specific nested object, non-recursively
 sort(json, ["config"], { deep: false });
+```
+
+## Format Operations
+
+### `format(json, options?)`
+
+Format a JSONC document with consistent indentation. Preserves comments while normalizing whitespace.
+
+```ts
+import { format } from "aywson";
+
+// Format minified JSON
+format('{"foo":"bar","baz":123}');
+// → '{
+//   "foo": "bar",
+//   "baz": 123
+// }'
+
+// Comments are preserved
+format('{ /* important */ "foo": "bar" }');
+// → '{
+//   /* important */
+//   "foo": "bar"
+// }'
+```
+
+**Options:**
+
+- `tabSize?: number` — Number of spaces per indentation level. Defaults to `2`.
+- `insertSpaces?: boolean` — Use spaces instead of tabs. Defaults to `true`.
+- `eol?: string` — End of line character. Defaults to `'\n'`.
+
+```ts
+// Use 4 spaces for indentation
+format(json, { tabSize: 4 });
+
+// Use tabs instead of spaces
+format(json, { insertSpaces: false });
+
+// Use Windows-style line endings
+format(json, { eol: "\r\n" });
 ```
 
 ## Comment Operations
@@ -548,6 +590,15 @@ aywson sort config.json dependencies
 
 # Sort without recursing into nested objects
 aywson sort config.json --no-deep
+
+# Format/prettify JSONC
+aywson format config.json
+
+# Format with 4-space indentation
+aywson format config.json --tab-size 4
+
+# Format with tabs instead of spaces
+aywson format config.json --tabs
 
 # Get a comment (above, or trailing as fallback)
 aywson comment config.json database.host

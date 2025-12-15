@@ -2,6 +2,7 @@ import {
   applyEdits,
   findNodeAtLocation,
   getNodeValue,
+  format as jsoncFormat,
   modify as jsoncModify,
   type Node,
   parseTree
@@ -1171,6 +1172,31 @@ function sortSingleObject(
   const afterObject = json.slice(objectEnd);
 
   return `${beforeObject}{\n${newContent}\n${closingIndent}}${afterObject}`;
+}
+
+// =============================================================================
+// Format Operations
+// =============================================================================
+
+/**
+ * Format a JSONC document with consistent indentation.
+ * Preserves comments while normalizing whitespace.
+ */
+export function format(
+  json: string,
+  options: {
+    /** Number of spaces per indentation level. Defaults to 2. */
+    tabSize?: number;
+    /** Use spaces instead of tabs. Defaults to true. */
+    insertSpaces?: boolean;
+    /** End of line character. Defaults to '\n'. */
+    eol?: string;
+  } = {}
+): string {
+  const { tabSize = 2, insertSpaces = true, eol = "\n" } = options;
+
+  const edits = jsoncFormat(json, undefined, { tabSize, insertSpaces, eol });
+  return applyEdits(json, edits);
 }
 
 // =============================================================================

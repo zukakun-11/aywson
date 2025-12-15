@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  format,
   get,
   getComment,
   getTrailingComment,
@@ -436,6 +437,98 @@ describe("parse", () => {
     expect(parse('"hello"')).toBe("hello");
     expect(parse("true")).toBe(true);
     expect(parse("null")).toBe(null);
+  });
+});
+
+describe("format", () => {
+  it("should format minified JSON", () => {
+    const json = '{"foo":"bar","baz":123}';
+    const result = format(json);
+    expect(result).toBe(`{
+  "foo": "bar",
+  "baz": 123
+}`);
+  });
+
+  it("should format with custom tab size", () => {
+    const json = '{"foo":"bar"}';
+    const result = format(json, { tabSize: 4 });
+    expect(result).toBe(`{
+    "foo": "bar"
+}`);
+  });
+
+  it("should format with tabs instead of spaces", () => {
+    const json = '{"foo":"bar"}';
+    const result = format(json, { insertSpaces: false });
+    expect(result).toBe(`{
+\t"foo": "bar"
+}`);
+  });
+
+  it("should preserve comments during formatting", () => {
+    const json = '{ /* comment */ "foo": "bar" }';
+    const result = format(json);
+    expect(result).toContain("/* comment */");
+    expect(result).toContain('"foo": "bar"');
+  });
+
+  it("should preserve line comments during formatting", () => {
+    const json = `{// comment
+"foo":"bar"}`;
+    const result = format(json);
+    expect(result).toContain("// comment");
+    expect(result).toContain('"foo": "bar"');
+  });
+
+  it("should format nested objects", () => {
+    const json = '{"outer":{"inner":{"deep":true}}}';
+    const result = format(json);
+    expect(result).toBe(`{
+  "outer": {
+    "inner": {
+      "deep": true
+    }
+  }
+}`);
+  });
+
+  it("should format arrays", () => {
+    const json = '{"items":[1,2,3]}';
+    const result = format(json);
+    expect(result).toBe(`{
+  "items": [
+    1,
+    2,
+    3
+  ]
+}`);
+  });
+
+  it("should handle already formatted JSON", () => {
+    const json = `{
+  "foo": "bar"
+}`;
+    const result = format(json);
+    expect(result).toBe(json);
+  });
+
+  it("should use custom end of line character", () => {
+    const json = '{"foo":"bar"}';
+    const result = format(json, { eol: "\r\n" });
+    expect(result).toBe(`{\r\n  "foo": "bar"\r\n}`);
+  });
+
+  it("should format empty objects", () => {
+    const json = "{}";
+    const result = format(json);
+    expect(result).toBe("{}");
+  });
+
+  it("should format empty arrays", () => {
+    const json = "[]";
+    const result = format(json);
+    expect(result).toBe("[]");
   });
 });
 

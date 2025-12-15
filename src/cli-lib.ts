@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import chalk from "chalk";
 import {
+  format,
   get,
   getComment,
   getTrailingComment,
@@ -159,12 +160,15 @@ Commands:
   rename <file> <path> <newKey>       Rename a key
   move <file> <fromPath> <toPath>     Move field to new location
   sort <file> [path]                  Sort object keys alphabetically
+  format <file>                       Format/prettify JSONC
   comment <file> <path> [text]        Get or set comment for a field
   uncomment <file> <path>             Remove comment from a field
 
 Options:
   --dry-run, -n    Show diff but don't write to file
   --no-deep        For sort: only sort specified object, not nested
+  --tab-size <n>   For format: spaces per indent (default: 2)
+  --tabs           For format: use tabs instead of spaces
   --trailing       For comment/uncomment: use trailing comment (same line)
   --help, -h       Show this help
   --version, -v    Show version
@@ -181,6 +185,9 @@ Examples:
   aywson modify config.json '{"database": {"host": "prod.db.com"}}'
   aywson sort config.json
   aywson sort config.json dependencies --no-deep
+  aywson format config.json
+  aywson format config.json --tab-size 4
+  aywson format config.json --tabs
   aywson comment config.json database.host "primary host"
   aywson comment --trailing config.json database.port "default: 5432"
 `);
@@ -204,6 +211,8 @@ interface ParsedArgs {
   args: string[];
   dryRun: boolean;
   noDeep: boolean;
+  tabSize: number;
+  useTabs: boolean;
   trailing: boolean;
 }
 
@@ -221,11 +230,31 @@ function parseArgs(argv: string[]): ParsedArgs | null {
     return null;
   }
 
-  // Filter out flags
+  // Parse flags
   const dryRun = args.includes("--dry-run") || args.includes("-n");
   const noDeep = args.includes("--no-deep");
+  const useTabs = args.includes("--tabs");
   const trailing = args.includes("--trailing");
-  const positional = args.filter((a) => !a.startsWith("-") || a === "-");
+
+  // Parse --tab-size <n>
+  let tabSize = 2;
+  const tabSizeIdx = args.indexOf("--tab-size");
+  const tabSizeValue = tabSizeIdx !== -1 ? args[tabSizeIdx + 1] : undefined;
+  if (tabSizeValue) {
+    tabSize = Number.parseInt(tabSizeValue, 10);
+    if (Number.isNaN(tabSize) || tabSize < 0) {
+      console.error("Error: --tab-size must be a non-negative integer");
+      process.exit(1);
+    }
+  }
+
+  // Filter out flags and their values
+  const positional = args.filter((a, i) => {
+    if (a.startsWith("-") && a !== "-") return false;
+    // Skip value after --tab-size
+    if (i > 0 && args[i - 1] === "--tab-size") return false;
+    return true;
+  });
 
   const command = positional[0];
   const file = positional[1];
@@ -236,7 +265,16 @@ function parseArgs(argv: string[]): ParsedArgs | null {
     process.exit(1);
   }
 
-  return { command, file, args: positional.slice(2), dryRun, noDeep, trailing };
+  return {
+    command,
+    file,
+    args: positional.slice(2),
+    dryRun,
+    noDeep,
+    tabSize,
+    useTabs,
+    trailing
+  };
 }
 
 function readInput(file: string): string {
@@ -259,7 +297,8 @@ export function run(): void {
   const parsed = parseArgs(process.argv);
   if (!parsed) return;
 
-  const { command, file, args, dryRun, noDeep, trailing } = parsed;
+  const { command, file, args, dryRun, noDeep, tabSize, useTabs, trailing } =
+    parsed;
 
   try {
     const json = readInput(file);
@@ -364,6 +403,15 @@ export function run(): void {
         const pathArg = args[0];
         const path = pathArg ? parsePath(pathArg) : [];
         const result = sort(json, path, { deep: !noDeep });
+        handleMutation(file, json, result, dryRun);
+        break;
+      }
+
+      case "format": {
+        const result = format(json, {
+          tabSize,
+          insertSpaces: !useTabs
+        });
         handleMutation(file, json, result, dryRun);
         break;
       }

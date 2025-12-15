@@ -444,3 +444,65 @@ aywson uncomment config.json database.host
 Mutating commands always show a colored diff. Use `--dry-run` (`-n`) to preview without writing.
 
 Path syntax uses dot-notation: `config.database.host` or bracket notation for indices: `items[0].name`
+
+## Comparison with `comment-json`
+
+[`comment-json`](https://www.npmjs.com/package/comment-json) is another popular package for working with JSON files that contain comments. Here's how the two packages differ:
+
+### Architecture
+
+| Aspect | aywson | comment-json |
+|--------|--------|--------------|
+| **Approach** | String-in, string-out | Parse to object, modify, stringify |
+| **Formatting** | Preserves original formatting exactly | Re-stringifies (may change formatting) |
+| **Mutations** | Immutable (returns new string) | Mutable (modifies object in place) |
+| **Comment storage** | Stays in the string | Symbol properties on object |
+
+### Feature Set
+
+| Category | aywson | comment-json |
+|----------|--------|--------------|
+| **Core** | `parse()` | `parse()`, `stringify()`, `assign()` |
+| **Path operations** | `get()`, `has()`, `set()`, `remove()` | Object/array access |
+| **Bulk updates** | `merge()`, `modify()` | `assign()` |
+| **Key manipulation** | `rename()`, `move()`, `sort()` | ❌ |
+| **Comment API** | `getComment()`, `setComment()`, `removeComment()` | Symbol-based access |
+| **Comment positions** | Above field | Many (before, after, inline, etc.) |
+| **Extras** | CLI, `**` prefix to preserve comments | `CommentArray` for array operations |
+
+### When to use aywson
+
+- You need **exact formatting preservation** (whitespace, indentation, trailing commas)
+- You want **surgical edits** without re-serializing the entire file
+- You prefer **immutable operations** that return new strings
+- You need **high-level operations** like rename, move, or sort
+- You want **explicit comment manipulation** with a simple API
+
+### When to use comment-json
+
+- You want to work with a **JavaScript object** and make many modifications before writing back
+- You're comfortable with **Symbol-based comment access**
+- Re-stringifying the entire file is acceptable for your use case
+
+### Example comparison
+
+**comment-json:**
+
+```js
+const { parse, stringify, assign } = require('comment-json');
+
+const obj = parse(jsonString);
+obj.database.port = 5433;
+assign(obj.database, { ssl: true });
+const result = stringify(obj, null, 2);
+```
+
+**aywson:**
+
+```js
+import { set, merge } from 'aywson';
+
+let result = set(jsonString, ['database', 'port'], 5433);
+result = merge(result, { database: { ssl: true } });
+// Original formatting preserved exactly
+```

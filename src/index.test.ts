@@ -283,6 +283,96 @@ describe("modify", () => {
   });
 });
 
+describe("unicode escape sequences", () => {
+  // These tests ensure we don't have the issue from:
+  // https://github.com/kaelzhang/node-comment-json/issues/29
+  // where unicode escape sequences are converted to literal characters
+  // when parse+stringify is used. aywson preserves them because it
+  // works directly on the string and only modifies what's necessary.
+
+  it("should preserve unicode escape sequences when modifying other fields", () => {
+    const json = `{
+  "settings": {
+    "additionalUnicodeChars": [
+      "\\u0008",
+      "\\u3000",
+      "\\u00A0"
+    ],
+    "enabled": true
+  }
+}`;
+    // Only change "enabled", leave the array untouched
+    const result = set(json, ["settings", "enabled"], false);
+    // The unicode escape sequences should be preserved exactly
+    expect(result).toContain('"\\u0008"');
+    expect(result).toContain('"\\u3000"');
+    expect(result).toContain('"\\u00A0"');
+    expect(result).toContain('"enabled": false');
+  });
+
+  it("should preserve unicode escapes when using set on different path", () => {
+    const json = '{ "unicode": "\\u3000", "other": "value" }';
+    const result = set(json, ["other"], "changed");
+    expect(result).toBe('{ "unicode": "\\u3000", "other": "changed" }');
+  });
+
+  it("should preserve unicode escapes when using merge", () => {
+    const json = '{ "unicode": "\\u3000", "count": 1 }';
+    const result = merge(json, { count: 2 });
+    expect(result).toBe('{ "unicode": "\\u3000", "count": 2 }');
+  });
+
+  it("should preserve unicode escapes when removing other fields", () => {
+    const json = `{
+  "unicode": "\\u3000",
+  "toRemove": "value"
+}`;
+    const result = remove(json, ["toRemove"]);
+    expect(result).toContain('"\\u3000"');
+  });
+
+  it("should preserve unicode escapes in arrays when modifying sibling fields", () => {
+    // Simulating a VS Code workspace config like in the original issue
+    const json = `{
+  "folders": [{ "path": "." }],
+  "settings": {
+    "highlight-bad-chars.additionalUnicodeChars": [
+      "\\u0008",
+      "\\u3000"
+    ],
+    "editor.renderWhitespace": "all"
+  }
+}`;
+    const result = set(json, ["settings", "editor.renderWhitespace"], "none");
+    expect(result).toContain('"\\u0008"');
+    expect(result).toContain('"\\u3000"');
+    expect(result).toContain('"editor.renderWhitespace": "none"');
+  });
+
+  it("should properly escape control characters when setting values", () => {
+    // This test ensures we don't have the issue from:
+    // https://github.com/kaelzhang/node-comment-json/issues/36
+    // Control characters (0x00-0x1F) must be escaped as \uXXXX per JSON spec
+    const json = '{ "test": "" }';
+
+    // Vertical tab (0x0B)
+    const result1 = set(json, ["test"], "\x0B");
+    expect(result1).toBe('{ "test": "\\u000b" }');
+
+    // Multiple control characters
+    const result2 = set(json, ["test"], "\x00\x01\x1F");
+    expect(result2).toBe('{ "test": "\\u0000\\u0001\\u001f" }');
+
+    // Backspace (0x08) - also a control character
+    const result3 = set(json, ["test"], "\x08");
+    expect(result3).toBe('{ "test": "\\b" }');
+
+    // Tab and newline have standard escapes
+    const result4 = set(json, ["test"], "\t\n");
+    expect(result4).toBe('{ "test": "\\t\\n" }');
+  });
+});
+
 describe("parse", () => {
   it("should parse simple JSON", () => {
     const result = parse('{ "foo": "bar" }');

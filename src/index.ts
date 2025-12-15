@@ -730,7 +730,9 @@ export function setTrailingComment(
 
   if (existingComment) {
     // Replace existing trailing comment
-    return `${json.slice(0, existingComment.start)}// ${comment}${json.slice(existingComment.end)}`;
+    return `${json.slice(0, existingComment.start)}// ${comment}${json.slice(
+      existingComment.end
+    )}`;
   }
   // Insert new trailing comment
   // If there's a comma, insert before it; otherwise insert after value

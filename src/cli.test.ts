@@ -2,16 +2,21 @@ import { execSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { diff, parsePath } from "./cli-lib";
 
-// Helper to run CLI commands
+// Build once before all CLI tests
+beforeAll(() => {
+  execSync("npm run build", { stdio: "pipe" });
+});
+
+// Helper to run CLI commands using the built version
 function runCli(
   args: string,
   cwd?: string
 ): { stdout: string; stderr: string; exitCode: number } {
   try {
-    const stdout = execSync(`npx tsx src/cli.ts ${args}`, {
+    const stdout = execSync(`node dist/cli.mjs ${args}`, {
       cwd: cwd ?? process.cwd(),
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"]

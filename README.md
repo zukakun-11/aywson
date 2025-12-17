@@ -72,12 +72,23 @@ const config = parse<Config>(jsonString);
 
 ## Path-based Operations
 
+Paths can be specified as either:
+- **String paths**: `"config.database.host"` or `"items[0].name"` (dot-notation, like the CLI)
+- **Array paths**: `["config", "database", "host"]` or `["items", 0, "name"]`
+
+Both formats work for all path-based operations.
+
 ### `get(json, path)`
 
 Get a value at a path.
 
 ```ts
+// Using array path
 get('{ "config": { "enabled": true } }', ["config", "enabled"]);
+// → true
+
+// Using string path
+get('{ "config": { "enabled": true } }', "config.enabled");
 // → true
 ```
 
@@ -86,7 +97,8 @@ get('{ "config": { "enabled": true } }', ["config", "enabled"]);
 Check if a path exists.
 
 ```ts
-has('{ "foo": "bar" }', ["foo"]); // → true
+has('{ "foo": "bar" }', ["foo"]); // → true (array path)
+has('{ "foo": "bar" }', "foo"); // → true (string path)
 has('{ "foo": "bar" }', ["baz"]); // → false
 ```
 
@@ -95,12 +107,22 @@ has('{ "foo": "bar" }', ["baz"]); // → false
 Set a value at a path, optionally with a comment.
 
 ```ts
+// Using array path
 set('{ "foo": "bar" }', ["foo"], "baz");
 // → '{ "foo": "baz" }'
 
+// Using string path
+set('{ "foo": "bar" }', "foo", "baz");
+// → '{ "foo": "baz" }'
+
 // With a comment
-set('{ "foo": "bar" }', ["foo"], "baz", "this is foo");
+set('{ "foo": "bar" }', "foo", "baz", "this is foo");
 // → adds "// this is foo" above the field
+
+// Nested paths work with both formats
+set('{ "config": {} }', "config.enabled", true);
+// or
+set('{ "config": {} }', ["config", "enabled"], true);
 ```
 
 ### `remove(json, path)`
@@ -108,6 +130,7 @@ set('{ "foo": "bar" }', ["foo"], "baz", "this is foo");
 Remove a field. Comments (both above and trailing) are also removed, unless they start with `**`.
 
 ```ts
+// Using array path
 remove(
   `{
   // this is foo
@@ -118,14 +141,20 @@ remove(
 );
 // → '{ "baz": 123 }' — comment removed too
 
+// Using string path
 remove(
   `{
   "foo": "bar", // trailing comment
   "baz": 123
 }`,
-  ["foo"]
+  "foo"
 );
 // → '{ "baz": 123 }' — trailing comment removed too
+
+// Nested paths
+remove(json, "config.database.host");
+// or
+remove(json, ["config", "database", "host"]);
 ```
 
 ## Merge Strategies
@@ -164,8 +193,18 @@ patch('{ "a": 1, "b": 2 }', { a: undefined });
 Rename a key while preserving its value.
 
 ```ts
+// Using array path
 rename('{ "oldName": 123 }', ["oldName"], "newName");
 // → '{ "newName": 123 }'
+
+// Using string path
+rename('{ "oldName": 123 }', "oldName", "newName");
+// → '{ "newName": 123 }'
+
+// Nested paths
+rename(json, "config.oldKey", "newKey");
+// or
+rename(json, ["config", "oldKey"], "newKey");
 ```
 
 ### `move(json, fromPath, toPath)`
@@ -173,12 +212,24 @@ rename('{ "oldName": 123 }', ["oldName"], "newName");
 Move a field to a different location.
 
 ```ts
+// Using array paths
 move(
   '{ "source": { "value": 123 }, "target": {} }',
   ["source", "value"],
   ["target", "value"]
 );
 // → '{ "source": {}, "target": { "value": 123 } }'
+
+// Using string paths
+move(
+  '{ "source": { "value": 123 }, "target": {} }',
+  "source.value",
+  "target.value"
+);
+// → '{ "source": {}, "target": { "value": 123 } }'
+
+// Mixed formats also work
+move(json, "source.value", ["target", "value"]);
 ```
 
 ## Sort Operations
@@ -204,10 +255,17 @@ sort(`{
 // → '{ "a": 2 // a trailing, "z": 1 // z trailing }'
 ```
 
-**Path:** Specify a path to sort only a nested object (defaults to `[]` for root).
+**Path:** Specify a path to sort only a nested object (defaults to `[]` or `""` for root).
 
 ```ts
+// Using array path
 sort(json, ["config", "database"]); // Sort only the database object
+
+// Using string path
+sort(json, "config.database"); // Sort only the database object
+
+// Root level (both equivalent)
+sort(json); // or sort(json, []) or sort(json, "")
 ```
 
 **Options:**
@@ -274,6 +332,7 @@ format(json, { eol: "\r\n" });
 Add or update a comment above a field.
 
 ```ts
+// Using array path
 setComment(
   `{
   "enabled": true
@@ -282,6 +341,9 @@ setComment(
   "controls the feature"
 );
 // → adds "// controls the feature" above the field
+
+// Using string path
+setComment(json, "config.enabled", "controls the feature");
 ```
 
 ### `removeComment(json, path)`
@@ -289,6 +351,7 @@ setComment(
 Remove the comment above a field.
 
 ```ts
+// Using array path
 removeComment(
   `{
   // this will be removed
@@ -297,6 +360,9 @@ removeComment(
   ["foo"]
 );
 // → '{ "foo": "bar" }'
+
+// Using string path
+removeComment(json, "config.enabled");
 ```
 
 ### `getComment(json, path)`
@@ -304,6 +370,7 @@ removeComment(
 Get the comment associated with a field. First checks for a comment above, then falls back to a trailing comment.
 
 ```ts
+// Using array path
 getComment(
   `{
   // this is foo
@@ -313,15 +380,16 @@ getComment(
 );
 // → "this is foo"
 
+// Using string path
 getComment(
   `{
   "foo": "bar" // trailing comment
 }`,
-  ["foo"]
+  "foo"
 );
 // → "trailing comment"
 
-getComment('{ "foo": "bar" }', ["foo"]);
+getComment('{ "foo": "bar" }', "foo");
 // → null (no comment)
 ```
 
@@ -341,6 +409,7 @@ Trailing comments are comments on the same line after a field value:
 Get the trailing comment after a field (explicitly, ignoring comments above).
 
 ```ts
+// Using array path
 getTrailingComment(
   `{
   "foo": "bar", // trailing comment
@@ -349,6 +418,9 @@ getTrailingComment(
   ["foo"]
 );
 // → "trailing comment"
+
+// Using string path
+getTrailingComment(json, "config.database.host");
 ```
 
 ### `setTrailingComment(json, path, comment)`
@@ -356,6 +428,7 @@ getTrailingComment(
 Add or update a trailing comment after a field.
 
 ```ts
+// Using array path
 setTrailingComment(
   `{
   "foo": "bar",
@@ -366,13 +439,13 @@ setTrailingComment(
 );
 // → '{ "foo": "bar" // this is foo, "baz": 123 }'
 
-// Update existing trailing comment
+// Using string path
 setTrailingComment(
   `{
   "foo": "bar", // old comment
   "baz": 123
 }`,
-  ["foo"],
+  "foo",
   "new comment"
 );
 // → replaces "old comment" with "new comment"
@@ -383,6 +456,7 @@ setTrailingComment(
 Remove the trailing comment after a field.
 
 ```ts
+// Using array path
 removeTrailingComment(
   `{
   "foo": "bar", // this will be removed
@@ -391,6 +465,9 @@ removeTrailingComment(
   ["foo"]
 );
 // → '{ "foo": "bar", "baz": 123 }'
+
+// Using string path
+removeTrailingComment(json, "config.database.host");
 ```
 
 ### Comments Above vs Trailing
@@ -404,15 +481,15 @@ const json = `{
   "baz": 123
 }`;
 
-getComment(json, ["foo"]); // → "comment above" (prefers above)
-getTrailingComment(json, ["foo"]); // → "trailing comment"
+getComment(json, "foo"); // → "comment above" (prefers above)
+getTrailingComment(json, "foo"); // → "trailing comment"
 
 // Set comment above (preserves trailing)
-setComment(json, ["foo"], "new above");
+setComment(json, "foo", "new above");
 // → both comments preserved, above is updated
 
 // Remove comment above (preserves trailing)
-removeComment(json, ["foo"]);
+removeComment(json, "foo");
 // → trailing comment still there
 ```
 
@@ -426,7 +503,7 @@ remove(
   // this comment will be deleted
   "config": {}
 }`,
-  ["config"]
+  "config"
 );
 // → '{}' — comment deleted with field
 
@@ -435,7 +512,7 @@ remove(
   // ** this comment will be preserved
   "config": {}
 }`,
-  ["config"]
+  "config"
 );
 // → '{ // ** this comment will be preserved }' — comment kept
 ```
@@ -466,14 +543,16 @@ const config = parse<Record<string, unknown>>(json);
 // Example: Update all feature flags to false
 for (const [key, value] of Object.entries(config.features as object)) {
   if (typeof value === "boolean") {
-    json = set(json, ["features", key], false);
+    json = set(json, `features.${key}`, false); // String path
+    // or: json = set(json, ["features", key], false); // Array path
   }
 }
 
 // Example: Remove fields based on condition
 for (const key of Object.keys(config)) {
   if (key.startsWith("_")) {
-    json = remove(json, [key]);
+    json = remove(json, key); // String path
+    // or: json = remove(json, [key]); // Array path
   }
 }
 
@@ -498,20 +577,21 @@ import { set } from "aywson";
 
 let json = "{}";
 
-// Build up the structure with comments
-json = set(json, ["database"], {}, "Database configuration");
-json = set(json, ["database", "host"], "localhost", "Primary database host");
-json = set(json, ["database", "port"], 5432);
-json = set(json, ["database", "ssl"], true, "Enable SSL in production");
+// Build up the structure with comments (using string paths)
+json = set(json, "database", {}, "Database configuration");
+json = set(json, "database.host", "localhost", "Primary database host");
+json = set(json, "database.port", 5432);
+json = set(json, "database.ssl", true, "Enable SSL in production");
 
-json = set(json, ["features"], {}, "Feature flags");
-json = set(json, ["features", "darkMode"], false);
+json = set(json, "features", {}, "Feature flags");
+json = set(json, "features.darkMode", false);
 json = set(
   json,
-  ["features", "beta"],
+  "features.beta",
   true,
   "Beta features - use with caution"
 );
+// Note: Array paths like ["database", "host"] also work
 
 console.log(json);
 ```
@@ -555,7 +635,8 @@ json = merge(json, {
 });
 
 // Add comments where needed
-json = setComment(json, ["scripts"], "Available npm scripts");
+json = setComment(json, "scripts", "Available npm scripts");
+// Note: Array paths like ["scripts"] also work
 ```
 
 ## CLI
@@ -621,7 +702,7 @@ aywson uncomment --trailing config.json database.port
 
 Mutating commands always show a colored diff. Use `--dry-run` (`-n`) to preview without writing.
 
-Path syntax uses dot-notation: `config.database.host` or bracket notation for indices: `items[0].name`
+**Path syntax:** The CLI uses dot-notation: `config.database.host` or bracket notation for indices: `items[0].name`. The API supports both string paths (same as CLI) and array paths: `["config", "database", "host"]`.
 
 ## Comparison with `comment-json`
 

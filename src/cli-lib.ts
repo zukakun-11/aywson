@@ -9,6 +9,7 @@ import {
   modify,
   move,
   parse,
+  parsePath,
   remove,
   removeComment,
   removeTrailingComment,
@@ -19,66 +20,8 @@ import {
   sort
 } from "./index.js";
 
-// =============================================================================
-// Path Parsing
-// =============================================================================
-
-/**
- * Parse a dot-notation path string into a JSONPath array
- * Examples:
- *   "config.database.host" -> ["config", "database", "host"]
- *   "items.0" -> ["items", 0]
- *   "items[0]" -> ["items", 0]
- */
-export function parsePath(pathStr: string): (string | number)[] {
-  if (!pathStr) return [];
-
-  const result: (string | number)[] = [];
-  let current = "";
-  let i = 0;
-
-  while (i < pathStr.length) {
-    const char = pathStr[i];
-
-    if (char === ".") {
-      if (current) {
-        result.push(parseSegment(current));
-        current = "";
-      }
-      i++;
-    } else if (char === "[") {
-      if (current) {
-        result.push(parseSegment(current));
-        current = "";
-      }
-      // Find closing bracket
-      const closeBracket = pathStr.indexOf("]", i);
-      if (closeBracket === -1) {
-        throw new Error(`Unclosed bracket in path: ${pathStr}`);
-      }
-      const indexStr = pathStr.slice(i + 1, closeBracket);
-      result.push(parseSegment(indexStr));
-      i = closeBracket + 1;
-    } else {
-      current += char;
-      i++;
-    }
-  }
-
-  if (current) {
-    result.push(parseSegment(current));
-  }
-
-  return result;
-}
-
-function parseSegment(segment: string): string | number {
-  const num = Number(segment);
-  if (!Number.isNaN(num) && Number.isInteger(num) && num >= 0) {
-    return num;
-  }
-  return segment;
-}
+// Re-export parsePath for backward compatibility with tests
+export { parsePath };
 
 // =============================================================================
 // Diff Display

@@ -12,7 +12,77 @@ import {
 // Types
 // =============================================================================
 
-export type JSONPath = (string | number)[];
+export type JSONPath = (string | number)[] | string;
+
+// =============================================================================
+// Path Parsing
+// =============================================================================
+
+/**
+ * Parse a dot-notation path string into a JSONPath array
+ * Examples:
+ *   "config.database.host" -> ["config", "database", "host"]
+ *   "items.0" -> ["items", 0]
+ *   "items[0]" -> ["items", 0]
+ */
+export function parsePath(pathStr: string): (string | number)[] {
+  if (!pathStr) return [];
+
+  const result: (string | number)[] = [];
+  let current = "";
+  let i = 0;
+
+  while (i < pathStr.length) {
+    const char = pathStr[i];
+
+    if (char === ".") {
+      if (current) {
+        result.push(parseSegment(current));
+        current = "";
+      }
+      i++;
+    } else if (char === "[") {
+      if (current) {
+        result.push(parseSegment(current));
+        current = "";
+      }
+      // Find closing bracket
+      const closeBracket = pathStr.indexOf("]", i);
+      if (closeBracket === -1) {
+        throw new Error(`Unclosed bracket in path: ${pathStr}`);
+      }
+      const indexStr = pathStr.slice(i + 1, closeBracket);
+      result.push(parseSegment(indexStr));
+      i = closeBracket + 1;
+    } else {
+      current += char;
+      i++;
+    }
+  }
+
+  if (current) {
+    result.push(parseSegment(current));
+  }
+
+  return result;
+}
+
+function parseSegment(segment: string): string | number {
+  const num = Number(segment);
+  if (!Number.isNaN(num) && Number.isInteger(num) && num >= 0) {
+    return num;
+  }
+  return segment;
+}
+
+/**
+ * Normalize a path to an array format
+ * If the path is already an array, return it as-is
+ * If it's a string, parse it using parsePath
+ */
+function normalizePath(path: JSONPath): (string | number)[] {
+  return typeof path === "string" ? parsePath(path) : path;
+}
 
 // =============================================================================
 // Shared Helpers
@@ -41,10 +111,11 @@ function findProperty(
   json: string,
   path: JSONPath
 ): { node: Node; propertyNode: Node; tree: Node } | null {
+  const normalizedPath = normalizePath(path);
   const tree = parseTree(json);
   if (!tree) return null;
 
-  const node = findNodeAtLocation(tree, path);
+  const node = findNodeAtLocation(tree, normalizedPath);
   if (!node || !node.parent) return null;
 
   return { node, propertyNode: node.parent, tree };
@@ -267,9 +338,9 @@ function findTrailingComment(
  */
 function flattenChanges(
   obj: Record<string, unknown>,
-  prefix: JSONPath = []
-): Array<{ path: JSONPath; value: unknown }> {
-  const result: Array<{ path: JSONPath; value: unknown }> = [];
+  prefix: (string | number)[] = []
+): Array<{ path: (string | number)[]; value: unknown }> {
+  const result: Array<{ path: (string | number)[]; value: unknown }> = [];
 
   for (const [key, value] of Object.entries(obj)) {
     const currentPath = [...prefix, key];
@@ -298,9 +369,9 @@ function flattenChanges(
 function computeDeletions(
   currentJson: string,
   changes: Record<string, unknown>,
-  prefix: JSONPath = []
-): Array<{ path: JSONPath; value: undefined }> {
-  const result: Array<{ path: JSONPath; value: undefined }> = [];
+  prefix: (string | number)[] = []
+): Array<{ path: (string | number)[]; value: undefined }> {
+  const result: Array<{ path: (string | number)[]; value: undefined }> = [];
 
   const tree = parseTree(currentJson);
   if (!tree) return result;
@@ -358,10 +429,11 @@ export function parse<T = unknown>(json: string): T {
  * Get the value at a path in the JSON
  */
 export function get(json: string, path: JSONPath): unknown {
+  const normalizedPath = normalizePath(path);
   const tree = parseTree(json);
   if (!tree) return undefined;
 
-  const node = findNodeAtLocation(tree, path);
+  const node = findNodeAtLocation(tree, normalizedPath);
   if (!node) return undefined;
 
   return getNodeValue(node);
@@ -371,10 +443,11 @@ export function get(json: string, path: JSONPath): unknown {
  * Check if a path exists in the JSON
  */
 export function has(json: string, path: JSONPath): boolean {
+  const normalizedPath = normalizePath(path);
   const tree = parseTree(json);
   if (!tree) return false;
 
-  const node = findNodeAtLocation(tree, path);
+  const node = findNodeAtLocation(tree, normalizedPath);
   return node !== undefined;
 }
 
@@ -383,7 +456,8 @@ export function has(json: string, path: JSONPath): boolean {
  * First checks for a comment above the field, then falls back to a trailing comment.
  */
 export function getComment(json: string, path: JSONPath): string | null {
-  const found = findProperty(json, path);
+  const normalizedPath = normalizePath(path);
+  const found = findProperty(json, normalizedPath);
   if (!found) return null;
 
   const { propertyNode } = found;
@@ -407,7 +481,8 @@ export function getTrailingComment(
   json: string,
   path: JSONPath
 ): string | null {
-  const found = findProperty(json, path);
+  const normalizedPath = normalizePath(path);
+  const found = findProperty(json, normalizedPath);
   if (!found) return null;
 
   const { propertyNode } = found;
@@ -426,12 +501,13 @@ export function set(
   value: unknown,
   comment?: string
 ): string {
-  const edits = jsoncModify(json, path, value, {});
+  const normalizedPath = normalizePath(path);
+  const edits = jsoncModify(json, normalizedPath, value, {});
   let result = applyEdits(json, edits);
 
   // Add comment if provided
   if (comment !== undefined) {
-    result = setComment(result, path, comment);
+    result = setComment(result, normalizedPath, comment);
   }
 
   return result;
@@ -441,7 +517,8 @@ export function set(
  * Remove a field at a path (with associated comment handling)
  */
 export function remove(json: string, path: JSONPath): string {
-  const found = findProperty(json, path);
+  const normalizedPath = normalizePath(path);
+  const found = findProperty(json, normalizedPath);
   if (!found) return json;
 
   const { propertyNode } = found;
@@ -533,7 +610,7 @@ export function merge(json: string, changes: Record<string, unknown>): string {
 
   for (const { path, value } of flatChanges) {
     if (value === undefined) {
-      result = remove(result, path);
+      result = remove(result, path as JSONPath);
     } else {
       const edits = jsoncModify(result, path, value, {});
       result = applyEdits(result, edits);
@@ -562,13 +639,13 @@ export function replace(
   );
 
   for (const { path } of sortedDeletions) {
-    result = remove(result, path);
+    result = remove(result, path as JSONPath);
   }
 
   // Then apply updates
   for (const { path, value } of flatChanges) {
     if (value === undefined) {
-      result = remove(result, path);
+      result = remove(result, path as JSONPath);
     } else {
       const edits = jsoncModify(result, path, value, {});
       result = applyEdits(result, edits);
@@ -593,7 +670,8 @@ export function patch(json: string, changes: Record<string, unknown>): string {
  * Rename a key while preserving its value and associated comment
  */
 export function rename(json: string, path: JSONPath, newKey: string): string {
-  const found = findProperty(json, path);
+  const normalizedPath = normalizePath(path);
+  const found = findProperty(json, normalizedPath);
   if (!found) return json;
 
   const { node, propertyNode } = found;
@@ -608,10 +686,10 @@ export function rename(json: string, path: JSONPath, newKey: string): string {
     : null;
 
   // Build new path
-  const newPath = [...path.slice(0, -1), newKey];
+  const newPath = [...normalizedPath.slice(0, -1), newKey];
 
   // Remove old key
-  let result = remove(json, path);
+  let result = remove(json, normalizedPath);
 
   // Add new key with the value
   result = set(result, newPath, value);
@@ -632,17 +710,19 @@ export function move(
   fromPath: JSONPath,
   toPath: JSONPath
 ): string {
-  const found = findProperty(json, fromPath);
+  const normalizedFromPath = normalizePath(fromPath);
+  const normalizedToPath = normalizePath(toPath);
+  const found = findProperty(json, normalizedFromPath);
   if (!found) return json;
 
   const { node } = found;
   const value = getNodeValue(node);
 
   // Remove from old location
-  let result = remove(json, fromPath);
+  let result = remove(json, normalizedFromPath);
 
   // Add to new location
-  result = set(result, toPath, value);
+  result = set(result, normalizedToPath, value);
 
   return result;
 }
@@ -659,7 +739,8 @@ export function setComment(
   path: JSONPath,
   comment: string
 ): string {
-  const found = findProperty(json, path);
+  const normalizedPath = normalizePath(path);
+  const found = findProperty(json, normalizedPath);
   if (!found) return json;
 
   const { propertyNode } = found;
@@ -710,7 +791,8 @@ export function setTrailingComment(
   path: JSONPath,
   comment: string
 ): string {
-  const found = findProperty(json, path);
+  const normalizedPath = normalizePath(path);
+  const found = findProperty(json, normalizedPath);
   if (!found) return json;
 
   const { propertyNode } = found;
@@ -749,7 +831,8 @@ export function setTrailingComment(
  * Remove the trailing comment after a field
  */
 export function removeTrailingComment(json: string, path: JSONPath): string {
-  const found = findProperty(json, path);
+  const normalizedPath = normalizePath(path);
+  const found = findProperty(json, normalizedPath);
   if (!found) return json;
 
   const { propertyNode } = found;
@@ -774,7 +857,8 @@ export function removeTrailingComment(json: string, path: JSONPath): string {
  * Remove the comment above a field
  */
 export function removeComment(json: string, path: JSONPath): string {
-  const found = findProperty(json, path);
+  const normalizedPath = normalizePath(path);
+  const found = findProperty(json, normalizedPath);
   if (!found) return json;
 
   const { propertyNode } = found;
@@ -889,12 +973,14 @@ export function sort(
   options: SortOptions = {}
 ): string {
   const { comparator = (a, b) => a.localeCompare(b), deep = true } = options;
+  const normalizedPath = normalizePath(path);
 
   const tree = parseTree(json);
   if (!tree) return json;
 
   // Find the target node at the given path
-  const targetNode = path.length === 0 ? tree : findNodeAtLocation(tree, path);
+  const targetNode =
+    normalizedPath.length === 0 ? tree : findNodeAtLocation(tree, normalizedPath);
   if (!targetNode || targetNode.type !== "object") return json;
 
   // Collect all objects that need sorting within the target (process deepest first)
@@ -936,7 +1022,7 @@ export function sort(
   // since sorting one object invalidates offsets for others
   if (deep && objectsToSort.length > 1) {
     // Re-parse and process again from scratch with updated positions
-    result = sortDeepAtPath(result, path, comparator);
+    result = sortDeepAtPath(result, normalizedPath, comparator);
   }
 
   return result;
@@ -947,7 +1033,7 @@ export function sort(
  */
 function sortDeepAtPath(
   json: string,
-  path: JSONPath,
+  path: (string | number)[],
   comparator: (a: string, b: string) => number
 ): string {
   const tree = parseTree(json);

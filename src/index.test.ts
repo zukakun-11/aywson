@@ -558,6 +558,21 @@ describe("get", () => {
     expect(get(json, ["items", 0])).toBe(1);
     expect(get(json, ["items", 2])).toBe(3);
   });
+
+  it("should work with string paths", () => {
+    const json = '{ "foo": "bar", "config": { "enabled": true, "count": 5 } }';
+    expect(get(json, "foo")).toBe("bar");
+    expect(get(json, "config.enabled")).toBe(true);
+    expect(get(json, "config.count")).toBe(5);
+    expect(get(json, "config")).toEqual({ enabled: true, count: 5 });
+  });
+
+  it("should work with string paths for arrays", () => {
+    const json = '{ "items": [1, 2, 3] }';
+    expect(get(json, "items")).toEqual([1, 2, 3]);
+    expect(get(json, "items.0")).toBe(1);
+    expect(get(json, "items[2]")).toBe(3);
+  });
 });
 
 describe("has", () => {
@@ -578,6 +593,14 @@ describe("has", () => {
     expect(has(json, ["config"])).toBe(true);
     expect(has(json, ["config", "enabled"])).toBe(true);
     expect(has(json, ["config", "disabled"])).toBe(false);
+  });
+
+  it("should work with string paths", () => {
+    const json = '{ "foo": "bar", "config": { "enabled": true } }';
+    expect(has(json, "foo")).toBe(true);
+    expect(has(json, "config.enabled")).toBe(true);
+    expect(has(json, "config.disabled")).toBe(false);
+    expect(has(json, "nonexistent")).toBe(false);
   });
 });
 
@@ -626,6 +649,18 @@ describe("set", () => {
     expect(result).toContain('"foo": "baz"');
   });
 
+  it("should work with string paths", () => {
+    const json = '{ "foo": "bar" }';
+    const result = set(json, "foo", "baz");
+    expect(result).toBe('{ "foo": "baz" }');
+  });
+
+  it("should create nested paths with string paths", () => {
+    const json = '{ "foo": "bar" }';
+    const result = set(json, "config.enabled", true);
+    expect(result).toBe('{ "foo": "bar","config": {"enabled":true} }');
+  });
+
   it("should set value without comment when comment is undefined", () => {
     const json = `{
   // existing comment
@@ -633,6 +668,15 @@ describe("set", () => {
 }`;
     const result = set(json, ["foo"], "baz");
     expect(result).toContain("// existing comment");
+    expect(result).toContain('"foo": "baz"');
+  });
+
+  it("should set value with comment using string path", () => {
+    const json = `{
+  "foo": "bar"
+}`;
+    const result = set(json, "foo", "baz", "this is foo");
+    expect(result).toContain("// this is foo");
     expect(result).toContain('"foo": "baz"');
   });
 });
@@ -664,6 +708,14 @@ describe("getComment", () => {
   it("should return null for non-existent path", () => {
     const json = '{ "foo": "bar" }';
     expect(getComment(json, ["nonexistent"])).toBeNull();
+  });
+
+  it("should work with string paths", () => {
+    const json = `{
+  // this is foo
+  "foo": "bar"
+}`;
+    expect(getComment(json, "foo")).toBe("this is foo");
   });
 
   it("should get comment from nested field", () => {
@@ -707,6 +759,24 @@ describe("remove", () => {
     expect(result).toBe(`{
   "baz": 123
 }`);
+  });
+
+  it("should work with string paths", () => {
+    const json = `{
+  "foo": "bar",
+  "baz": 123
+}`;
+    const result = remove(json, "foo");
+    expect(result).toBe(`{
+  "baz": 123
+}`);
+  });
+
+  it("should work with nested string paths", () => {
+    const json = '{ "config": { "enabled": true, "other": 123 } }';
+    const result = remove(json, "config.enabled");
+    expect(get(result, ["config", "other"])).toBe(123);
+    expect(has(result, ["config", "enabled"])).toBe(false);
   });
 
   it("should preserve comments starting with **", () => {
@@ -808,6 +878,20 @@ describe("rename", () => {
     expect(has(result, ["config", "oldKey"])).toBe(false);
   });
 
+  it("should work with string paths", () => {
+    const json = '{ "oldName": "value" }';
+    const result = rename(json, "oldName", "newName");
+    expect(get(result, ["newName"])).toBe("value");
+    expect(has(result, ["oldName"])).toBe(false);
+  });
+
+  it("should work with nested string paths", () => {
+    const json = '{ "config": { "oldKey": 123 } }';
+    const result = rename(json, "config.oldKey", "newKey");
+    expect(get(result, ["config", "newKey"])).toBe(123);
+    expect(has(result, ["config", "oldKey"])).toBe(false);
+  });
+
   it("should rename and preserve value", () => {
     const json = `{
   "oldName": "value",
@@ -833,6 +917,20 @@ describe("move", () => {
     const result = move(json, ["nested", "value"], ["topLevel"]);
     expect(get(result, ["topLevel"])).toBe(123);
   });
+
+  it("should work with string paths", () => {
+    const json = '{ "source": { "value": 123 }, "target": {} }';
+    const result = move(json, "source.value", "target.value");
+    expect(get(result, ["target", "value"])).toBe(123);
+    expect(has(result, ["source", "value"])).toBe(false);
+  });
+
+  it("should work with mixed string and array paths", () => {
+    const json = '{ "source": { "value": 123 }, "target": {} }';
+    const result = move(json, "source.value", ["target", "value"]);
+    expect(get(result, ["target", "value"])).toBe(123);
+    expect(has(result, ["source", "value"])).toBe(false);
+  });
 });
 
 describe("setComment", () => {
@@ -853,6 +951,15 @@ describe("setComment", () => {
     const result = setComment(json, ["foo"], "new comment");
     expect(result).toContain("// new comment");
     expect(result).not.toContain("old comment");
+  });
+
+  it("should work with string paths", () => {
+    const json = `{
+  "foo": "bar"
+}`;
+    const result = setComment(json, "foo", "foo: this is foo");
+    expect(result).toContain("// foo: this is foo");
+    expect(result).toContain('"foo": "bar"');
   });
 
   it("should work with nested fields", () => {
@@ -877,6 +984,16 @@ describe("removeComment", () => {
   "foo": "bar"
 }`;
     const result = removeComment(json, ["foo"]);
+    expect(result).not.toContain("// this is a comment");
+    expect(result).toContain('"foo": "bar"');
+  });
+
+  it("should work with string paths", () => {
+    const json = `{
+  // this is a comment
+  "foo": "bar"
+}`;
+    const result = removeComment(json, "foo");
     expect(result).not.toContain("// this is a comment");
     expect(result).toContain('"foo": "bar"');
   });
@@ -1149,6 +1266,32 @@ describe("sort", () => {
     const result = sort(json, ["a"]);
     expect(result).toBe(json);
   });
+
+  it("should work with string paths", () => {
+    const json = `{
+  "config": {
+    "z": 1,
+    "a": 2,
+    "m": 3
+  }
+}`;
+    const result = sort(json, "config");
+    expect(result).toContain('"a": 2');
+    expect(result).toContain('"m": 3');
+    expect(result).toContain('"z": 1');
+  });
+
+  it("should work with empty string path (root)", () => {
+    const json = `{
+  "z": 1,
+  "a": 2,
+  "m": 3
+}`;
+    const result = sort(json, "");
+    expect(result).toContain('"a": 2');
+    expect(result).toContain('"m": 3');
+    expect(result).toContain('"z": 1');
+  });
 });
 
 describe("trailing comments", () => {
@@ -1167,6 +1310,14 @@ describe("trailing comments", () => {
   "baz": 123
 }`;
       expect(getTrailingComment(json, ["foo"])).toBe("block comment");
+    });
+
+    it("should work with string paths", () => {
+      const json = `{
+  "foo": "bar", // this is foo
+  "baz": 123
+}`;
+      expect(getTrailingComment(json, "foo")).toBe("this is foo");
     });
 
     it("should return null if no trailing comment exists", () => {
@@ -1240,6 +1391,15 @@ describe("trailing comments", () => {
       expect(result).not.toContain("old comment");
     });
 
+    it("should work with string paths", () => {
+      const json = `{
+  "foo": "bar",
+  "baz": 123
+}`;
+      const result = setTrailingComment(json, "foo", "this is foo");
+      expect(result).toContain('"foo": "bar" // this is foo,');
+    });
+
     it("should work with nested fields", () => {
       const json = `{
   "config": {
@@ -1271,6 +1431,16 @@ describe("trailing comments", () => {
   "baz": 123
 }`;
       const result = removeTrailingComment(json, ["foo"]);
+      expect(result).not.toContain("// this is a comment");
+      expect(result).toContain('"foo": "bar",');
+    });
+
+    it("should work with string paths", () => {
+      const json = `{
+  "foo": "bar", // this is a comment
+  "baz": 123
+}`;
+      const result = removeTrailingComment(json, "foo");
       expect(result).not.toContain("// this is a comment");
       expect(result).toContain('"foo": "bar",');
     });

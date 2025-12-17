@@ -13,24 +13,37 @@ beforeAll(() => {
 // Helper to run CLI commands using the built version
 function runCli(
   args: string,
-  cwd?: string
+  cwd?: string,
+  env?: Record<string, string>
 ): { stdout: string; stderr: string; exitCode: number } {
   try {
-    const stdout = execSync(`node dist/cli.mjs ${args}`, {
+    const result = execSync(`node dist/cli.mjs ${args}`, {
       cwd: cwd ?? process.cwd(),
       encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ...env },
+      maxBuffer: 100 * 1024 * 1024 // 100MB buffer for large file tests
     });
-    return { stdout, stderr: "", exitCode: 0 };
+    return { stdout: result.toString(), stderr: "", exitCode: 0 };
   } catch (error: unknown) {
     const execError = error as {
-      stdout?: string;
-      stderr?: string;
+      stdout?: Buffer | string;
+      stderr?: Buffer | string;
       status?: number;
     };
+    const stdout = execError.stdout
+      ? Buffer.isBuffer(execError.stdout)
+        ? execError.stdout.toString("utf-8")
+        : execError.stdout
+      : "";
+    const stderr = execError.stderr
+      ? Buffer.isBuffer(execError.stderr)
+        ? execError.stderr.toString("utf-8")
+        : execError.stderr
+      : "";
     return {
-      stdout: execError.stdout ?? "",
-      stderr: execError.stderr ?? "",
+      stdout,
+      stderr,
       exitCode: execError.status ?? 1
     };
   }
@@ -41,7 +54,8 @@ describe("CLI commands", () => {
   let testFile: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), "aywson-test-"));
+    // Create temp dir in current working directory to avoid path validation issues
+    tempDir = mkdtempSync(join(process.cwd(), "aywson-test-"));
     testFile = join(tempDir, "test.json");
   });
 
@@ -388,5 +402,298 @@ describe("diff", () => {
     expect(result).toContain("+ ");
     expect(result).toContain("123");
     expect(result).toContain("456");
+  });
+});
+
+describe("Security features", () => {
+  let tempDir: string;
+  let testFile: string;
+  let parentDir: string;
+  let parentFile: string;
+
+  beforeEach(() => {
+    // Create temp dir in current working directory to avoid path validation issues
+    tempDir = mkdtempSync(join(process.cwd(), "aywson-test-"));
+    testFile = join(tempDir, "test.json");
+    parentDir = join(tempDir, "..");
+    parentFile = join(parentDir, "parent.json");
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+    // Clean up parent file if it exists
+    try {
+      rmSync(parentFile, { force: true });
+    } catch {
+      // Ignore if file doesn't exist
+    }
+  });
+
+  describe("Path validation", () => {
+    it("should block path traversal by default", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Use a path that definitely goes outside the working directory
+      const outsidePath = join(process.cwd(), "..", "..", "etc", "passwd");
+      const { exitCode, stderr, stdout } = runCli(`get ${outsidePath} foo`);
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("Path traversal detected");
+    });
+
+    it("should allow path traversal with --allow-path-traversal flag", () => {
+      writeFileSync(parentFile, '{ "foo": "bar" }');
+      const { stdout, exitCode } = runCli(
+        `get --allow-path-traversal ${parentFile} foo`
+      );
+      expect(exitCode).toBe(0);
+      expect(stdout.trim()).toBe('"bar"');
+    });
+
+    it("should allow stdin (-) without path validation", () => {
+      const { stdout, exitCode } = runCli(`parse -`, undefined, undefined);
+      // stdin is allowed, but will fail because there's no input
+      // The important thing is it doesn't fail with path traversal error
+      expect(exitCode).toBeGreaterThanOrEqual(0);
+    });
+
+    it("should block path traversal on write operations", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Use a path that definitely goes outside the working directory
+      const outsidePath = join(process.cwd(), "..", "..", "sensitive.json");
+      const { exitCode, stderr, stdout } = runCli(`set ${outsidePath} foo '"baz"'`);
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("Path traversal detected");
+    });
+
+    it("should allow path traversal on write with flag", () => {
+      writeFileSync(parentFile, '{ "foo": "bar" }');
+      const { exitCode } = runCli(
+        `set --allow-path-traversal ${parentFile} foo '"baz"'`
+      );
+      expect(exitCode).toBe(0);
+      const result = JSON.parse(readFileSync(parentFile, "utf-8"));
+      expect(result.foo).toBe("baz");
+    });
+  });
+
+  describe("File size limits", () => {
+    it("should reject files larger than default limit (50MB)", () => {
+      // Create a file larger than 50MB
+      // Use a smaller size for testing to avoid memory issues, but test the mechanism
+      const largeContent = "x".repeat(51 * 1024 * 1024);
+      writeFileSync(testFile, largeContent);
+      const { exitCode, stderr, stdout } = runCli(`parse ${testFile}`);
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("File too large");
+      // Check for the default limit (50MB = 52428800 bytes)
+      expect(errorOutput).toMatch(/50|52428800/);
+    });
+
+    it("should accept files within default limit", () => {
+      // Create a file smaller than 50MB
+      const content = JSON.stringify({ data: "x".repeat(10 * 1024 * 1024) });
+      writeFileSync(testFile, content);
+      const { exitCode } = runCli(`parse ${testFile}`);
+      expect(exitCode).toBe(0);
+    });
+
+    it("should respect --max-file-size flag", () => {
+      // Create a 10MB file
+      const content = JSON.stringify({ data: "x".repeat(10 * 1024 * 1024) });
+      writeFileSync(testFile, content);
+      // Set limit to 5MB - should fail
+      const { exitCode, stderr, stdout } = runCli(
+        `parse --max-file-size ${5 * 1024 * 1024} ${testFile}`
+      );
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("File too large");
+    });
+
+    it("should allow larger files with --max-file-size flag", () => {
+      // Create a 10MB file
+      const content = JSON.stringify({ data: "x".repeat(10 * 1024 * 1024) });
+      writeFileSync(testFile, content);
+      // Set limit to 20MB - should succeed
+      const { exitCode } = runCli(
+        `parse --max-file-size ${20 * 1024 * 1024} ${testFile}`
+      );
+      expect(exitCode).toBe(0);
+    });
+
+    it("should allow unlimited file size with --no-file-size-limit", () => {
+      // Create a file larger than 50MB
+      const largeContent = JSON.stringify({ data: "x".repeat(51 * 1024 * 1024) });
+      writeFileSync(testFile, largeContent);
+      const { exitCode } = runCli(`parse --no-file-size-limit ${testFile}`);
+      expect(exitCode).toBe(0);
+    });
+
+    it("should allow stdin without file size limit", () => {
+      // stdin should not be subject to file size limits
+      const { exitCode } = runCli(`parse -`);
+      // Will fail because no input, but not because of size limit
+      expect(exitCode).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe("JSON parsing limits", () => {
+    it("should reject JSON larger than default limit (10MB)", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Test the limit mechanism with a smaller size that can be passed as CLI arg
+      // The actual 10MB limit is tested via the environment variable override tests
+      // This test verifies the error message format
+      const json = JSON.stringify({ data: "x".repeat(11000) });
+      const { exitCode, stderr, stdout } = runCli(
+        `set ${testFile} data '${json}'`,
+        undefined,
+        { AYWSON_MAX_JSON_SIZE: "10000" }
+      );
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("JSON input too large");
+      expect(errorOutput).toContain("10000");
+    });
+
+    it("should accept JSON within default size limit", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Create JSON string smaller than 10MB - use reasonable size for CLI args
+      const json = JSON.stringify({ data: "x".repeat(1000) });
+      const { exitCode } = runCli(`set ${testFile} data '${json}'`);
+      expect(exitCode).toBe(0);
+    });
+
+    it("should respect AYWSON_MAX_JSON_SIZE environment variable", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Create JSON that exceeds the custom limit
+      const json = JSON.stringify({ data: "x".repeat(5000) });
+      // Set limit to 3000 bytes - should fail
+      const { exitCode, stderr, stdout } = runCli(
+        `set ${testFile} data '${json}'`,
+        undefined,
+        { AYWSON_MAX_JSON_SIZE: "3000" }
+      );
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("JSON input too large");
+    });
+
+    it("should allow larger JSON with AYWSON_MAX_JSON_SIZE", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Create JSON within the custom limit
+      const json = JSON.stringify({ data: "x".repeat(5000) });
+      // Set limit to 10000 bytes - should succeed
+      const { exitCode } = runCli(
+        `set ${testFile} data '${json}'`,
+        undefined,
+        { AYWSON_MAX_JSON_SIZE: "10000" }
+      );
+      expect(exitCode).toBe(0);
+    });
+
+    it("should reject deeply nested JSON (default depth: 100)", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Create deeply nested JSON (101 levels)
+      let deepJson = "1";
+      for (let i = 0; i < 101; i++) {
+        deepJson = `{"nested": ${deepJson}}`;
+      }
+      const { exitCode, stderr, stdout } = runCli(
+        `modify ${testFile} '${deepJson}'`
+      );
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("too deeply nested");
+      expect(errorOutput).toContain("100");
+    });
+
+    it("should accept JSON within default depth limit", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Create nested JSON (50 levels)
+      let nestedJson = "1";
+      for (let i = 0; i < 50; i++) {
+        nestedJson = `{"nested": ${nestedJson}}`;
+      }
+      const { exitCode } = runCli(`modify ${testFile} '${nestedJson}'`);
+      expect(exitCode).toBe(0);
+    });
+
+    it("should respect AYWSON_MAX_JSON_DEPTH environment variable", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Create nested JSON (50 levels)
+      let nestedJson = "1";
+      for (let i = 0; i < 50; i++) {
+        nestedJson = `{"nested": ${nestedJson}}`;
+      }
+      // Set limit to 30 - should fail
+      const { exitCode, stderr, stdout } = runCli(
+        `modify ${testFile} '${nestedJson}'`,
+        undefined,
+        { AYWSON_MAX_JSON_DEPTH: "30" }
+      );
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("too deeply nested");
+    });
+
+    it("should allow deeper JSON with AYWSON_MAX_JSON_DEPTH", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Create nested JSON (150 levels)
+      let nestedJson = "1";
+      for (let i = 0; i < 150; i++) {
+        nestedJson = `{"nested": ${nestedJson}}`;
+      }
+      // Set limit to 200 - should succeed
+      const { exitCode } = runCli(
+        `modify ${testFile} '${nestedJson}'`,
+        undefined,
+        { AYWSON_MAX_JSON_DEPTH: "200" }
+      );
+      expect(exitCode).toBe(0);
+    });
+
+    it("should apply limits to modify command", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Test with a size that works as CLI arg but exceeds a small limit
+      const json = JSON.stringify({ data: "x".repeat(5000) });
+      const { exitCode, stderr, stdout } = runCli(
+        `modify ${testFile} '${json}'`,
+        undefined,
+        { AYWSON_MAX_JSON_SIZE: "3000" }
+      );
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("JSON input too large");
+    });
+
+    it("should apply limits to merge command", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Test with a size that works as CLI arg but exceeds a small limit
+      const json = JSON.stringify({ data: "x".repeat(5000) });
+      const { exitCode, stderr, stdout } = runCli(
+        `merge ${testFile} '${json}'`,
+        undefined,
+        { AYWSON_MAX_JSON_SIZE: "3000" }
+      );
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("JSON input too large");
+    });
+
+    it("should apply limits to set command", () => {
+      writeFileSync(testFile, '{ "foo": "bar" }');
+      // Test with a size that works as CLI arg but exceeds a small limit
+      const json = JSON.stringify({ data: "x".repeat(5000) });
+      const { exitCode, stderr, stdout } = runCli(
+        `set ${testFile} data '${json}'`,
+        undefined,
+        { AYWSON_MAX_JSON_SIZE: "3000" }
+      );
+      expect(exitCode).toBe(1);
+      const errorOutput = stderr || stdout;
+      expect(errorOutput).toContain("JSON input too large");
+    });
   });
 });

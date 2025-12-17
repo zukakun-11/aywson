@@ -704,6 +704,91 @@ Mutating commands always show a colored diff. Use `--dry-run` (`-n`) to preview 
 
 **Path syntax:** The CLI uses dot-notation: `config.database.host` or bracket notation for indices: `items[0].name`. The API supports both string paths (same as CLI) and array paths: `["config", "database", "host"]`.
 
+### Security Options
+
+```bash
+# Path validation (prevents path traversal attacks)
+aywson get config.json database.host  # ✅ Works
+aywson get ../etc/passwd root          # ❌ Blocked by default
+aywson get --allow-path-traversal ../etc/passwd root  # ✅ Override (not recommended)
+
+# File size limits (default: 50MB)
+aywson parse large.json  # ✅ Works if < 50MB
+aywson parse --max-file-size 100000000 large.json  # ✅ Custom limit (100MB)
+aywson parse --no-file-size-limit huge.json  # ✅ Disable limit (not recommended)
+
+# JSON parsing limits (via environment variables)
+AYWSON_MAX_JSON_SIZE=20000000 aywson modify config.json '{"large": "data"}'
+AYWSON_MAX_JSON_DEPTH=200 aywson merge config.json '{"deep": {"nested": {...}}}'
+```
+
+## Security
+
+aywson includes several security features to protect against common attacks when processing untrusted input:
+
+### Path Validation
+
+By default, the CLI prevents path traversal attacks by validating that all file paths stay within the current working directory. This prevents access to files outside the intended directory (e.g., `../etc/passwd`).
+
+**Override:** Use the `--allow-path-traversal` flag to bypass this protection (not recommended for untrusted input).
+
+```bash
+# Blocked by default
+aywson get ../sensitive-file.json key
+
+# Override (use with caution)
+aywson get --allow-path-traversal ../sensitive-file.json key
+```
+
+### File Size Limits
+
+To prevent memory exhaustion attacks, file size is limited by default to **50MB**. Files larger than this limit will be rejected.
+
+**Override:** Use `--max-file-size <bytes>` to set a custom limit, or `--no-file-size-limit` to disable the limit entirely.
+
+```bash
+# Default 50MB limit
+aywson parse large.json
+
+# Custom limit (100MB)
+aywson parse --max-file-size 104857600 large.json
+
+# No limit (not recommended)
+aywson parse --no-file-size-limit huge.json
+```
+
+**Note:** Stdin (`-`) is exempt from file size limits.
+
+### JSON Parsing Limits
+
+JSON input is validated for both size and nesting depth to prevent denial-of-service attacks:
+
+- **Default max size:** 10MB
+- **Default max depth:** 100 levels
+
+**Override:** Set environment variables to customize these limits:
+
+```bash
+# Increase JSON size limit to 20MB
+AYWSON_MAX_JSON_SIZE=20971520 aywson modify config.json '{"large": "data"}'
+
+# Increase depth limit to 200 levels
+AYWSON_MAX_JSON_DEPTH=200 aywson merge config.json '{"deep": {...}}'
+
+# Both limits
+AYWSON_MAX_JSON_SIZE=20971520 AYWSON_MAX_JSON_DEPTH=200 aywson modify config.json '...'
+```
+
+These limits apply to JSON arguments in `set`, `modify`, and `merge` commands.
+
+### Security Best Practices
+
+1. **Don't disable security features** unless you fully trust your input sources
+2. **Use appropriate limits** for your use case rather than disabling them entirely
+3. **Validate input** before passing it to aywson when processing untrusted data
+4. **Run with least privilege** - don't run aywson as root or with elevated permissions
+5. **Keep dependencies updated** - regularly update aywson and its dependencies for security patches
+
 ## Comparison with `comment-json`
 
 [`comment-json`](https://www.npmjs.com/package/comment-json) is another popular package for working with JSON files that contain comments. Here's how the two packages differ:

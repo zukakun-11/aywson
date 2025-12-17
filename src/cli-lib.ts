@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import chalk from "chalk";
 import {
   format,
@@ -22,6 +23,143 @@ import {
 
 // Re-export parsePath for backward compatibility with tests
 export { parsePath };
+
+// =============================================================================
+// Security Functions
+// =============================================================================
+
+/**
+ * Default limits for security
+ */
+const DEFAULT_MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const DEFAULT_MAX_JSON_SIZE = 10 * 1024 * 1024; // 10MB
+const DEFAULT_MAX_JSON_DEPTH = 100;
+
+/**
+ * Get JSON parsing limits from environment variables
+ */
+function getJsonLimits(): {
+  maxSize: number;
+  maxDepth: number;
+} {
+  const maxSize =
+    process.env.AYWSON_MAX_JSON_SIZE !== undefined
+      ? Number.parseInt(process.env.AYWSON_MAX_JSON_SIZE, 10)
+      : DEFAULT_MAX_JSON_SIZE;
+
+  const maxDepth =
+    process.env.AYWSON_MAX_JSON_DEPTH !== undefined
+      ? Number.parseInt(process.env.AYWSON_MAX_JSON_DEPTH, 10)
+      : DEFAULT_MAX_JSON_DEPTH;
+
+  if (Number.isNaN(maxSize) || maxSize < 0) {
+    throw new Error(
+      "Invalid AYWSON_MAX_JSON_SIZE environment variable (must be non-negative integer)"
+    );
+  }
+
+  if (Number.isNaN(maxDepth) || maxDepth < 0) {
+    throw new Error(
+      "Invalid AYWSON_MAX_JSON_DEPTH environment variable (must be non-negative integer)"
+    );
+  }
+
+  return { maxSize, maxDepth };
+}
+
+/**
+ * Calculate the depth of a JSON value
+ */
+function calculateJsonDepth(value: unknown, currentDepth = 0): number {
+  if (currentDepth > 1000) {
+    // Safety limit to prevent infinite recursion
+    return currentDepth;
+  }
+
+  if (value === null || typeof value !== "object") {
+    return currentDepth;
+  }
+
+  if (Array.isArray(value)) {
+    return Math.max(
+      currentDepth,
+      ...value.map((item) => calculateJsonDepth(item, currentDepth + 1))
+    );
+  }
+
+  // Object
+  return Math.max(
+    currentDepth,
+    ...Object.values(value).map((val) =>
+      calculateJsonDepth(val, currentDepth + 1)
+    )
+  );
+}
+
+/**
+ * Safely parse JSON with size and depth limits
+ */
+function safeJsonParse(
+  str: string,
+  maxSize?: number,
+  maxDepth?: number
+): unknown {
+  const limits = getJsonLimits();
+  const sizeLimit = maxSize ?? limits.maxSize;
+  const depthLimit = maxDepth ?? limits.maxDepth;
+
+  // Check size
+  if (str.length > sizeLimit) {
+    throw new Error(
+      `JSON input too large: ${str.length} bytes (max: ${sizeLimit} bytes). ` +
+        `Override with AYWSON_MAX_JSON_SIZE environment variable.`
+    );
+  }
+
+  // Parse JSON
+  const parsed = JSON.parse(str);
+
+  // Check depth
+  const depth = calculateJsonDepth(parsed);
+  if (depth > depthLimit) {
+    throw new Error(
+      `JSON input too deeply nested: ${depth} levels (max: ${depthLimit} levels). ` +
+        `Override with AYWSON_MAX_JSON_DEPTH environment variable.`
+    );
+  }
+
+  return parsed;
+}
+
+/**
+ * Validate file path to prevent path traversal attacks
+ */
+function validatePath(filePath: string, allowPathTraversal: boolean): string {
+  if (allowPathTraversal || filePath === "-") {
+    return filePath;
+  }
+
+  // Resolve the path relative to current working directory
+  const resolved = resolve(process.cwd(), filePath);
+  const base = resolve(process.cwd());
+
+  // Check if resolved path is outside the base directory
+  const relativePath = relative(base, resolved);
+  if (
+    relativePath.startsWith("..") ||
+    relativePath.includes("..") ||
+    (process.platform === "win32" &&
+      resolved !== base &&
+      !resolved.startsWith(base))
+  ) {
+    throw new Error(
+      `Path traversal detected: "${filePath}". ` +
+        `Use --allow-path-traversal to override (not recommended).`
+    );
+  }
+
+  return resolved;
+}
 
 // =============================================================================
 // Diff Display
@@ -108,13 +246,21 @@ Commands:
   uncomment <file> <path>             Remove comment from a field
 
 Options:
-  --dry-run, -n    Show diff but don't write to file
-  --no-deep        For sort: only sort specified object, not nested
-  --tab-size <n>   For format: spaces per indent (default: 2)
-  --tabs           For format: use tabs instead of spaces
-  --trailing       For comment/uncomment: use trailing comment (same line)
-  --help, -h       Show this help
-  --version, -v    Show version
+  --dry-run, -n              Show diff but don't write to file
+  --no-deep                  For sort: only sort specified object, not nested
+  --tab-size <n>             For format: spaces per indent (default: 2)
+  --tabs                     For format: use tabs instead of spaces
+  --trailing                 For comment/uncomment: use trailing comment (same line)
+  --allow-path-traversal     Allow file paths outside current directory (not recommended)
+  --max-file-size <bytes>    Maximum file size in bytes (default: 50MB)
+  --no-file-size-limit       Disable file size limit (not recommended)
+  --help, -h                 Show this help
+  --version, -v              Show version
+
+Security:
+  JSON parsing limits can be overridden via environment variables:
+    AYWSON_MAX_JSON_SIZE  Maximum JSON input size in bytes (default: 10MB)
+    AYWSON_MAX_JSON_DEPTH Maximum JSON nesting depth (default: 100)
 
 Path Syntax:
   Use dot-notation: config.database.host
@@ -157,6 +303,9 @@ interface ParsedArgs {
   tabSize: number;
   useTabs: boolean;
   trailing: boolean;
+  allowPathTraversal: boolean;
+  maxFileSize: number | null;
+  noFileSizeLimit: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs | null {
@@ -178,6 +327,8 @@ function parseArgs(argv: string[]): ParsedArgs | null {
   const noDeep = args.includes("--no-deep");
   const useTabs = args.includes("--tabs");
   const trailing = args.includes("--trailing");
+  const allowPathTraversal = args.includes("--allow-path-traversal");
+  const noFileSizeLimit = args.includes("--no-file-size-limit");
 
   // Parse --tab-size <n>
   let tabSize = 2;
@@ -191,11 +342,25 @@ function parseArgs(argv: string[]): ParsedArgs | null {
     }
   }
 
+  // Parse --max-file-size <bytes>
+  let maxFileSize: number | null = null;
+  const maxFileSizeIdx = args.indexOf("--max-file-size");
+  const maxFileSizeValue =
+    maxFileSizeIdx !== -1 ? args[maxFileSizeIdx + 1] : undefined;
+  if (maxFileSizeValue) {
+    maxFileSize = Number.parseInt(maxFileSizeValue, 10);
+    if (Number.isNaN(maxFileSize) || maxFileSize < 0) {
+      console.error("Error: --max-file-size must be a non-negative integer");
+      process.exit(1);
+    }
+  }
+
   // Filter out flags and their values
   const positional = args.filter((a, i) => {
     if (a.startsWith("-") && a !== "-") return false;
-    // Skip value after --tab-size
+    // Skip values after flags
     if (i > 0 && args[i - 1] === "--tab-size") return false;
+    if (i > 0 && args[i - 1] === "--max-file-size") return false;
     return true;
   });
 
@@ -216,23 +381,60 @@ function parseArgs(argv: string[]): ParsedArgs | null {
     noDeep,
     tabSize,
     useTabs,
-    trailing
+    trailing,
+    allowPathTraversal,
+    maxFileSize,
+    noFileSizeLimit
   };
 }
 
-function readInput(file: string): string {
-  if (file === "-") {
-    // Read from stdin
+function readInput(
+  file: string,
+  allowPathTraversal: boolean,
+  maxFileSize: number | null,
+  noFileSizeLimit: boolean
+): string {
+  // Validate path (unless stdin or override is set)
+  const validatedFile = validatePath(file, allowPathTraversal);
+
+  if (validatedFile === "-") {
+    // Read from stdin (no size limit for stdin)
     return readFileSync(0, "utf-8");
   }
-  return readFileSync(file, "utf-8");
+
+  // Check file size if limit is enabled
+  if (!noFileSizeLimit) {
+    const sizeLimit = maxFileSize ?? DEFAULT_MAX_FILE_SIZE;
+    try {
+      const stats = statSync(validatedFile);
+      if (stats.size > sizeLimit) {
+        throw new Error(
+          `File too large: ${stats.size} bytes (max: ${sizeLimit} bytes). ` +
+            `Use --max-file-size <bytes> or --no-file-size-limit to override.`
+        );
+      }
+    } catch (error) {
+      // If stat fails (e.g., file doesn't exist), let readFileSync handle it
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  return readFileSync(validatedFile, "utf-8");
 }
 
-function writeOutput(file: string, content: string): void {
+function writeOutput(
+  file: string,
+  content: string,
+  allowPathTraversal: boolean
+): void {
   if (file === "-") {
     process.stdout.write(content);
   } else {
-    writeFileSync(file, content);
+    // Validate path (unless override is set)
+    const validatedFile = validatePath(file, allowPathTraversal);
+    writeFileSync(validatedFile, content);
   }
 }
 
@@ -240,11 +442,27 @@ export function run(): void {
   const parsed = parseArgs(process.argv);
   if (!parsed) return;
 
-  const { command, file, args, dryRun, noDeep, tabSize, useTabs, trailing } =
-    parsed;
+  const {
+    command,
+    file,
+    args,
+    dryRun,
+    noDeep,
+    tabSize,
+    useTabs,
+    trailing,
+    allowPathTraversal,
+    maxFileSize,
+    noFileSizeLimit
+  } = parsed;
 
   try {
-    const json = readInput(file);
+    const json = readInput(
+      file,
+      allowPathTraversal,
+      maxFileSize,
+      noFileSizeLimit
+    );
 
     switch (command) {
       case "parse": {
@@ -273,9 +491,9 @@ export function run(): void {
           process.exit(1);
         }
         const path = parsePath(pathArg);
-        const value = JSON.parse(valueArg);
+        const value = safeJsonParse(valueArg);
         const result = set(json, path, value);
-        handleMutation(file, json, result, dryRun);
+        handleMutation(file, json, result, dryRun, allowPathTraversal);
         break;
       }
 
@@ -287,7 +505,7 @@ export function run(): void {
         }
         const path = parsePath(pathArg);
         const result = remove(json, path);
-        handleMutation(file, json, result, dryRun);
+        handleMutation(file, json, result, dryRun, allowPathTraversal);
         break;
       }
 
@@ -297,9 +515,17 @@ export function run(): void {
           console.error("Error: modify requires a JSON argument");
           process.exit(1);
         }
-        const changes = JSON.parse(changesArg);
-        const result = modify(json, changes);
-        handleMutation(file, json, result, dryRun);
+        const changes = safeJsonParse(changesArg);
+        if (
+          typeof changes !== "object" ||
+          changes === null ||
+          Array.isArray(changes)
+        ) {
+          console.error("Error: modify requires a JSON object");
+          process.exit(1);
+        }
+        const result = modify(json, changes as Record<string, unknown>);
+        handleMutation(file, json, result, dryRun, allowPathTraversal);
         break;
       }
 
@@ -309,9 +535,17 @@ export function run(): void {
           console.error("Error: merge requires a JSON argument");
           process.exit(1);
         }
-        const changes = JSON.parse(changesArg);
-        const result = merge(json, changes);
-        handleMutation(file, json, result, dryRun);
+        const changes = safeJsonParse(changesArg);
+        if (
+          typeof changes !== "object" ||
+          changes === null ||
+          Array.isArray(changes)
+        ) {
+          console.error("Error: merge requires a JSON object");
+          process.exit(1);
+        }
+        const result = merge(json, changes as Record<string, unknown>);
+        handleMutation(file, json, result, dryRun, allowPathTraversal);
         break;
       }
 
@@ -324,7 +558,7 @@ export function run(): void {
         }
         const path = parsePath(pathArg);
         const result = rename(json, path, newKeyArg);
-        handleMutation(file, json, result, dryRun);
+        handleMutation(file, json, result, dryRun, allowPathTraversal);
         break;
       }
 
@@ -338,7 +572,7 @@ export function run(): void {
         const fromPath = parsePath(fromArg);
         const toPath = parsePath(toArg);
         const result = move(json, fromPath, toPath);
-        handleMutation(file, json, result, dryRun);
+        handleMutation(file, json, result, dryRun, allowPathTraversal);
         break;
       }
 
@@ -346,7 +580,7 @@ export function run(): void {
         const pathArg = args[0];
         const path = pathArg ? parsePath(pathArg) : [];
         const result = sort(json, path, { deep: !noDeep });
-        handleMutation(file, json, result, dryRun);
+        handleMutation(file, json, result, dryRun, allowPathTraversal);
         break;
       }
 
@@ -355,7 +589,7 @@ export function run(): void {
           tabSize,
           insertSpaces: !useTabs
         });
-        handleMutation(file, json, result, dryRun);
+        handleMutation(file, json, result, dryRun, allowPathTraversal);
         break;
       }
 
@@ -382,7 +616,7 @@ export function run(): void {
           const result = trailing
             ? setTrailingComment(json, path, textArg)
             : setComment(json, path, textArg);
-          handleMutation(file, json, result, dryRun);
+          handleMutation(file, json, result, dryRun, allowPathTraversal);
         }
         break;
       }
@@ -397,7 +631,7 @@ export function run(): void {
         const result = trailing
           ? removeTrailingComment(json, path)
           : removeComment(json, path);
-        handleMutation(file, json, result, dryRun);
+        handleMutation(file, json, result, dryRun, allowPathTraversal);
         break;
       }
 
@@ -420,7 +654,8 @@ function handleMutation(
   file: string,
   original: string,
   result: string,
-  dryRun: boolean
+  dryRun: boolean,
+  allowPathTraversal: boolean
 ): void {
   // Always show the diff
   if (original !== result) {
@@ -431,7 +666,7 @@ function handleMutation(
 
   // Write unless dry-run
   if (!dryRun && file !== "-") {
-    writeOutput(file, result);
+    writeOutput(file, result, allowPathTraversal);
   } else if (dryRun) {
     console.log("\n(dry-run: file not modified)");
   }

@@ -42,13 +42,13 @@ After installation, you can begin modifying your JSONC files easily.
    Look for the aywson icon on your desktop or in your Start Menu. Double-click to open the application.
 
 2. **Loading a JSONC File**  
-   Click on "File" in the top-left corner, then select "Open..." to browse your files. Choose the JSONC file you wish to modify and click 'Open'.
+   Click on 'File' in the top-left corner, then select 'Open...' to browse your files. Choose the JSONC file you wish to modify and click 'Open'.
 
 3. **Make Your Modifications**  
    You can edit the contents of the JSONC in the main window. Your comments and formatting will remain intact, making it easy to see what you're changing.
 
 4. **Saving Your Changes**  
-   Once you finish editing, click "File" again, then select "Save" to save your changes. Your file will now reflect your updated content.
+   Once you finish editing, click 'File' again, then select 'Save' to save your changes. Your file will now reflect your updated content.
 
 ## 📋 System Requirements
 

